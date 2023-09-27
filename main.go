@@ -71,7 +71,11 @@ func main() {
 	}
 	database.SetDatabase(db)
 
-	subs, err := subscriptions.LoadSubscriptions()
+	subBot, err := tgBot.New(botToken)
+	if err != nil {
+		panic(err)
+	}
+	subs, err := subscriptions.LoadSubscriptions(subBot)
 	if err != nil {
 		subs = nil
 		fmt.Printf("WARN : Could not load subscriptions: %s\n", err.Error())
@@ -153,7 +157,7 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 
 		switch {
 		case strings.HasPrefix(update.Message.Text, trainInfoCommand):
-			response = handleFindTrainStages(ctx, b, update, subs)
+			response = handleFindTrainStages(ctx, b, update)
 		case strings.HasPrefix(update.Message.Text, cancelCommand):
 			handlers.SetChatFlow(chatFlow, handlers.InitialFlowType, handlers.InitialFlowType, "")
 			response = &handlers.HandlerResponse{
@@ -170,7 +174,7 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 				})
 			case handlers.TrainInfoFlowType:
 				log.Printf("DEBUG: trainInfoFlowType with stage %s\n", chatFlow.Stage)
-				response = handleFindTrainStages(ctx, b, update, subs)
+				response = handleFindTrainStages(ctx, b, update)
 			}
 		}
 	}
@@ -208,18 +212,18 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 					ChatID: update.CallbackQuery.Message.Chat.ID,
 					Text:   pleaseWaitMessage,
 				})
-				response = handlers.HandleTrainNumberCommand(ctx, trainNumber, date, -1)
+				response, _ = handlers.HandleTrainNumberCommand(ctx, trainNumber, date, -1, false)
 				if err == nil {
 					response.ProgressMessageToEditId = message.ID
 				}
 				handlers.SetChatFlow(chatFlow, handlers.InitialFlowType, handlers.InitialFlowType, "")
 
 			case handlers.TrainInfoChooseGroupCallbackQuery:
+				trainNumber := splitted[1]
 				dateInt, _ := strconv.ParseInt(splitted[2], 10, 64)
 				date := time.Unix(dateInt, 0)
 				groupIndex, _ := strconv.ParseInt(splitted[3], 10, 31)
-				log.Printf("%s, %v, %d", update.CallbackQuery.Data, splitted, groupIndex)
-				originalResponse := handlers.HandleTrainNumberCommand(ctx, splitted[1], date, int(groupIndex))
+				originalResponse, _ := handlers.HandleTrainNumberCommand(ctx, trainNumber, date, int(groupIndex), false)
 				response = &handlers.HandlerResponse{
 					MessageEdits: []*tgBot.EditMessageTextParams{
 						{
@@ -231,12 +235,78 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 						},
 					},
 				}
+
+			case handlers.TrainInfoSubscribeCallbackQuery:
+				trainNumber := splitted[1]
+				dateInt, _ := strconv.ParseInt(splitted[2], 10, 64)
+				date := time.Unix(dateInt, 0)
+				groupIndex, _ := strconv.ParseInt(splitted[3], 10, 31)
+				err := subs.InsertSubscription(subscriptions.SubData{
+					ChatId:      update.CallbackQuery.Message.Chat.ID,
+					MessageId:   update.CallbackQuery.Message.ID,
+					TrainNumber: trainNumber,
+					Date:        date,
+					GroupIndex:  int(groupIndex),
+				})
+				if err != nil {
+					log.Printf("ERROR: Subscribe error: %s", err.Error())
+					response = &handlers.HandlerResponse{
+						CallbackAnswer: &tgBot.AnswerCallbackQueryParams{
+							Text:      fmt.Sprintf("Error when subscribing."),
+							ShowAlert: true,
+						},
+					}
+				} else {
+					// TODO: Update message to contain unsubscribe button
+					response = &handlers.HandlerResponse{
+						CallbackAnswer: &tgBot.AnswerCallbackQueryParams{
+							Text: fmt.Sprintf("Subscribed successfully!"),
+						},
+						MessageMarkupEdits: []*tgBot.EditMessageReplyMarkupParams{
+							{
+								ChatID:      update.CallbackQuery.Message.Chat.ID,
+								MessageID:   update.CallbackQuery.Message.ID,
+								ReplyMarkup: handlers.GetTrainNumberCommandResponseButtons(trainNumber, date, int(groupIndex), handlers.TrainInfoResponseButtonIncludeUnsub),
+							},
+						},
+					}
+				}
+
+			case handlers.TrainInfoUnsubscribeCallbackQuery:
+				trainNumber := splitted[1]
+				dateInt, _ := strconv.ParseInt(splitted[2], 10, 64)
+				date := time.Unix(dateInt, 0)
+				groupIndex, _ := strconv.ParseInt(splitted[3], 10, 31)
+				_, err := subs.DeleteSubscription(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.ID)
+				if err != nil {
+					log.Printf("ERROR: Unsubscribe error: %s", err.Error())
+					response = &handlers.HandlerResponse{
+						CallbackAnswer: &tgBot.AnswerCallbackQueryParams{
+							Text:      fmt.Sprintf("Error when unsubscribing."),
+							ShowAlert: true,
+						},
+					}
+				} else {
+					// TODO: Update message to contain unsubscribe button
+					response = &handlers.HandlerResponse{
+						CallbackAnswer: &tgBot.AnswerCallbackQueryParams{
+							Text: fmt.Sprintf("Unsubscribed successfully!"),
+						},
+						MessageMarkupEdits: []*tgBot.EditMessageReplyMarkupParams{
+							{
+								ChatID:      update.CallbackQuery.Message.Chat.ID,
+								MessageID:   update.CallbackQuery.Message.ID,
+								ReplyMarkup: handlers.GetTrainNumberCommandResponseButtons(trainNumber, date, int(groupIndex), handlers.TrainInfoResponseButtonIncludeSub),
+							},
+						},
+					}
+				}
 			}
 		}
 	}
 }
 
-func handleFindTrainStages(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *subscriptions.Subscriptions) *handlers.HandlerResponse {
+func handleFindTrainStages(ctx context.Context, b *tgBot.Bot, update *models.Update) *handlers.HandlerResponse {
 	log.Println("DEBUG: handleFindTrainStages")
 	var response *handlers.HandlerResponse
 
@@ -270,7 +340,7 @@ func handleFindTrainStages(ctx context.Context, b *tgBot.Bot, update *models.Upd
 				groupIndex, _ = strconv.Atoi(commandParams[2])
 			}
 
-			response = handlers.HandleTrainNumberCommand(ctx, trainNumber, date, groupIndex)
+			response, _ = handlers.HandleTrainNumberCommand(ctx, trainNumber, date, groupIndex, false)
 			if err == nil {
 				response.ProgressMessageToEditId = message.ID
 			}
@@ -306,7 +376,7 @@ func handleFindTrainStages(ctx context.Context, b *tgBot.Bot, update *models.Upd
 					ChatID: update.Message.Chat.ID,
 					Text:   pleaseWaitMessage,
 				})
-				response = handlers.HandleTrainNumberCommand(ctx, chatFlow.Extra, date, -1)
+				response, _ = handlers.HandleTrainNumberCommand(ctx, chatFlow.Extra, date, -1, false)
 				if err == nil {
 					response.ProgressMessageToEditId = message.ID
 				}

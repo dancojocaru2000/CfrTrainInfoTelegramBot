@@ -18,11 +18,23 @@ import (
 const (
 	TrainInfoChooseDateCallbackQuery  = "TI_CHOOSE_DATE"
 	TrainInfoChooseGroupCallbackQuery = "TI_CHOOSE_GROUP"
+	TrainInfoSubscribeCallbackQuery   = "TI_SUB"
+	TrainInfoUnsubscribeCallbackQuery = "TI_UNSUB"
 
 	viewInKaiBaseUrl = "https://kai.infotren.dcdev.ro/view-train.html"
+
+	subscribeButton    = "Subscribe to updates"
+	unsubscribeButton  = "Unsubscribe from updates"
+	openInWebAppButton = "Open in WebApp"
 )
 
-func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time.Time, groupIndex int) *HandlerResponse {
+const (
+	TrainInfoResponseButtonExcludeSub = iota
+	TrainInfoResponseButtonIncludeSub
+	TrainInfoResponseButtonIncludeUnsub
+)
+
+func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time.Time, groupIndex int, isSubscribed bool) (*HandlerResponse, bool) {
 	trainData, err := api.GetTrain(ctx, trainNumber, date)
 
 	switch {
@@ -34,50 +46,46 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 			Message: &bot.SendMessageParams{
 				Text: fmt.Sprintf("The train %s was not found.", trainNumber),
 			},
-		}
+		}, false
 	case errors.Is(err, api.ServerError):
 		log.Printf("ERROR: In handle train number: %s", err.Error())
 		return &HandlerResponse{
 			Message: &bot.SendMessageParams{
 				Text: fmt.Sprintf("Unknown server error when searching for train %s.", trainNumber),
 			},
-		}
+		}, false
 	default:
 		log.Printf("ERROR: In handle train number: %s", err.Error())
-		return nil
+		return nil, false
 	}
 
 	if len(trainData.Groups) == 1 {
 		groupIndex = 0
 	}
 
-	kaiUrl, _ := url.Parse(viewInKaiBaseUrl)
-	kaiUrlQuery := kaiUrl.Query()
-	kaiUrlQuery.Add("train", trainData.Number)
-	kaiUrlQuery.Add("date", trainData.Groups[0].Stations[0].Departure.ScheduleTime.Format(time.RFC3339))
-	if groupIndex != -1 {
-		kaiUrlQuery.Add("groupIndex", strconv.Itoa(groupIndex))
-	}
-	kaiUrl.RawQuery = kaiUrlQuery.Encode()
-
 	message := bot.SendMessageParams{}
 	if groupIndex == -1 {
 		message.Text = fmt.Sprintf("Train %s %s contains multiple groups. Please choose one.", trainData.Rank, trainData.Number)
-		replyButtons := make([][]models.InlineKeyboardButton, len(trainData.Groups)+1)
-		for i := range replyButtons {
-			if i == len(trainData.Groups) {
-				replyButtons[i] = append(replyButtons[i], models.InlineKeyboardButton{
-					Text: "Open in WebApp",
-					URL:  kaiUrl.String(),
-				})
-			} else {
-				group := &trainData.Groups[i]
-				replyButtons[i] = append(replyButtons[i], models.InlineKeyboardButton{
+		replyButtons := make([][]models.InlineKeyboardButton, 0, len(trainData.Groups)+1)
+		for i, group := range trainData.Groups {
+			replyButtons = append(replyButtons, []models.InlineKeyboardButton{
+				{
 					Text:         fmt.Sprintf("%s ➔ %s", group.Route.From, group.Route.To),
 					CallbackData: fmt.Sprintf(TrainInfoChooseGroupCallbackQuery+"\x1b%s\x1b%d\x1b%d", trainNumber, date.Unix(), i),
-				})
-			}
+				},
+			})
 		}
+		kaiUrl, _ := url.Parse(viewInKaiBaseUrl)
+		kaiUrlQuery := kaiUrl.Query()
+		kaiUrlQuery.Add("train", trainData.Number)
+		kaiUrlQuery.Add("date", trainData.Groups[0].Stations[0].Departure.ScheduleTime.Format(time.RFC3339))
+		kaiUrl.RawQuery = kaiUrlQuery.Encode()
+		replyButtons = append(replyButtons, []models.InlineKeyboardButton{
+			{
+				Text: "Open in WebApp",
+				URL:  kaiUrl.String(),
+			},
+		})
 		message.ReplyMarkup = models.InlineKeyboardMarkup{
 			InlineKeyboard: replyButtons,
 		}
@@ -127,16 +135,11 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 				Length: len(fmt.Sprintf("%s %s", trainData.Rank, trainData.Number)),
 			},
 		}
-		message.ReplyMarkup = models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{
-				{
-					models.InlineKeyboardButton{
-						Text: "Open in WebApp",
-						URL:  kaiUrl.String(),
-					},
-				},
-			},
+		buttonKind := TrainInfoResponseButtonIncludeSub
+		if isSubscribed {
+			buttonKind = TrainInfoResponseButtonIncludeUnsub
 		}
+		message.ReplyMarkup = GetTrainNumberCommandResponseButtons(trainData.Number, group.Stations[0].Departure.ScheduleTime, groupIndex, buttonKind)
 	} else {
 		message.Text = fmt.Sprintf("The status of the train %s %s is unknown.", trainData.Rank, trainData.Number)
 		message.Entities = []models.MessageEntity{
@@ -146,19 +149,47 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 				Length: len(fmt.Sprintf("%s %s", trainData.Rank, trainData.Number)),
 			},
 		}
-		message.ReplyMarkup = models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{
-				{
-					models.InlineKeyboardButton{
-						Text: "Open in WebApp",
-						URL:  kaiUrl.String(),
-					},
-				},
-			},
-		}
+		message.ReplyMarkup = GetTrainNumberCommandResponseButtons(trainData.Number, trainData.Groups[0].Stations[0].Departure.ScheduleTime, groupIndex, TrainInfoResponseButtonExcludeSub)
 	}
 
 	return &HandlerResponse{
 		Message: &message,
+	}, true
+}
+
+func GetTrainNumberCommandResponseButtons(trainNumber string, date time.Time, groupIndex int, responseButton int) models.ReplyMarkup {
+	kaiUrl, _ := url.Parse(viewInKaiBaseUrl)
+	kaiUrlQuery := kaiUrl.Query()
+	kaiUrlQuery.Add("train", trainNumber)
+	kaiUrlQuery.Add("date", date.Format(time.RFC3339))
+	if groupIndex != -1 {
+		kaiUrlQuery.Add("groupIndex", strconv.Itoa(groupIndex))
+	}
+	kaiUrl.RawQuery = kaiUrlQuery.Encode()
+
+	result := make([][]models.InlineKeyboardButton, 0)
+	if responseButton == TrainInfoResponseButtonIncludeSub {
+		result = append(result, []models.InlineKeyboardButton{
+			{
+				Text:         subscribeButton,
+				CallbackData: fmt.Sprintf(TrainInfoSubscribeCallbackQuery+"\x1b%s\x1b%d\x1b%d", trainNumber, date.Unix(), groupIndex),
+			},
+		})
+	} else if responseButton == TrainInfoResponseButtonIncludeUnsub {
+		result = append(result, []models.InlineKeyboardButton{
+			{
+				Text:         unsubscribeButton,
+				CallbackData: fmt.Sprintf(TrainInfoUnsubscribeCallbackQuery+"\x1b%s\x1b%d\x1b%d", trainNumber, date.Unix(), groupIndex),
+			},
+		})
+	}
+	result = append(result, []models.InlineKeyboardButton{
+		{
+			Text: openInWebAppButton,
+			URL:  kaiUrl.String(),
+		},
+	})
+	return models.InlineKeyboardMarkup{
+		InlineKeyboard: result,
 	}
 }

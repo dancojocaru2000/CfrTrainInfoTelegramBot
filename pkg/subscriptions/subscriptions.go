@@ -2,7 +2,9 @@ package subscriptions
 
 import (
 	"context"
+	"dcdev.ro/CfrTrainInfoTelegramBot/pkg/handlers"
 	"fmt"
+	"github.com/go-telegram/bot"
 	"log"
 	"sync"
 	"time"
@@ -17,14 +19,16 @@ type SubData struct {
 	MessageId   int
 	TrainNumber string
 	Date        time.Time
+	GroupIndex  int
 }
 
 type Subscriptions struct {
 	mutex sync.RWMutex
 	data  map[int64][]SubData
+	tgBot *bot.Bot
 }
 
-func LoadSubscriptions() (*Subscriptions, error) {
+func LoadSubscriptions(tgBot *bot.Bot) (*Subscriptions, error) {
 	subs := make([]SubData, 0)
 	_, err := database.ReadDB(func(db *gorm.DB) (*gorm.DB, error) {
 		result := db.Find(&subs)
@@ -37,6 +41,7 @@ func LoadSubscriptions() (*Subscriptions, error) {
 	return &Subscriptions{
 		mutex: sync.RWMutex{},
 		data:  result,
+		tgBot: tgBot,
 	}, err
 }
 
@@ -58,12 +63,12 @@ func (sub *Subscriptions) Replace(chatId int64, data []SubData) error {
 	return err
 }
 
-func (sub *Subscriptions) InsertSubscription(chatId int64, data SubData) error {
+func (sub *Subscriptions) InsertSubscription(data SubData) error {
 	sub.mutex.Lock()
 	defer sub.mutex.Unlock()
-	datas := sub.data[chatId]
+	datas := sub.data[data.ChatId]
 	datas = append(datas, data)
-	sub.data[chatId] = datas
+	sub.data[data.ChatId] = datas
 	_, err := database.WriteDB(func(db *gorm.DB) (*gorm.DB, error) {
 		db.Create(&data)
 		return db, db.Error
@@ -121,23 +126,70 @@ func (sub *Subscriptions) DeleteSubscription(chatId int64, messageId int) (*SubD
 func (sub *Subscriptions) CheckSubscriptions(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 90)
 
+	sub.executeChecks(ctx)
 	for {
 		select {
 		case <-ticker.C:
-			func() {
-				sub.mutex.RLock()
-				defer sub.mutex.RUnlock()
-
-				for chatId, datas := range sub.data {
-					// TODO: Check for updates
-					for i := range datas {
-						data := &datas[i]
-						log.Printf("DEBUG: Timer tick, update for chat %d, train %s", chatId, data.TrainNumber)
-					}
-				}
-			}()
+			sub.executeChecks(ctx)
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+type workerData struct {
+	tgBot *bot.Bot
+	data  SubData
+}
+
+func (sub *Subscriptions) executeChecks(ctx context.Context) {
+	sub.mutex.RLock()
+	defer sub.mutex.RUnlock()
+
+	// Only allow 8 concurrent requests
+	// TODO: Make configurable instead of hardcoded
+	workerCount := 8
+	workerChan := make(chan workerData, workerCount)
+	wg := &sync.WaitGroup{}
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go checkWorker(ctx, workerChan, wg)
+	}
+
+	for _, datas := range sub.data {
+		for i := range datas {
+			workerChan <- workerData{
+				tgBot: sub.tgBot,
+				data:  datas[i],
+			}
+		}
+	}
+	close(workerChan)
+	wg.Wait()
+}
+
+func checkWorker(ctx context.Context, workerChan <-chan workerData, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for wData := range workerChan {
+		data := wData.data
+		log.Printf("DEBUG: Timer tick, update for chat %d, train %s, date %s, group %d", data.ChatId, data.TrainNumber, data.Date.Format("2006-01-02"), data.GroupIndex)
+
+		resp, ok := handlers.HandleTrainNumberCommand(ctx, data.TrainNumber, data.Date, data.GroupIndex, true)
+
+		if !ok || resp == nil || resp.Message == nil {
+			// Silently discard update errors
+			log.Printf("DEBUG: Error when updating chat %d, train %s, date %s, group %d", data.ChatId, data.TrainNumber, data.Date.Format("2006-01-02"), data.GroupIndex)
+			return
+		}
+
+		_, _ = wData.tgBot.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:                data.ChatId,
+			MessageID:             data.MessageId,
+			Text:                  resp.Message.Text,
+			ParseMode:             resp.Message.ParseMode,
+			Entities:              resp.Message.Entities,
+			DisableWebPagePreview: resp.Message.DisableWebPagePreview,
+			ReplyMarkup:           resp.Message.ReplyMarkup,
+		})
 	}
 }
