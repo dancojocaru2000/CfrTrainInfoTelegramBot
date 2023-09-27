@@ -54,6 +54,7 @@ func main() {
 	log.SetOutput(os.Stderr)
 
 	botToken := os.Getenv("CFR_BOT.TOKEN")
+	botToken = strings.TrimSpace(botToken)
 	if len(botToken) == 0 {
 		log.Fatal("ERROR: No bot token supplied; supply with CFR_BOT.TOKEN")
 	}
