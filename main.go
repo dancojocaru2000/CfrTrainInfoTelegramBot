@@ -59,7 +59,13 @@ func main() {
 		log.Fatal("ERROR: No bot token supplied; supply with CFR_BOT.TOKEN")
 	}
 
-	db, err := gorm.Open(sqlite.Open("bot_db.sqlite"), &gorm.Config{})
+	dbPath := os.Getenv("CFR_BOT.DB_PATH")
+	dbPath = strings.TrimSpace(dbPath)
+	if len(dbPath) == 0 {
+		dbPath = "bot_db.sqlite"
+	}
+	log.Printf("INFO : DB Path: %s\n", dbPath)
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		panic(err)
 	}
