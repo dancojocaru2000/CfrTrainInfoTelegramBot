@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"dcdev.ro/CfrTrainInfoTelegramBot/pkg/utils"
 	"errors"
 	"fmt"
 	"log"
@@ -133,6 +134,67 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 
 		messageText.WriteString(fmt.Sprintf("Date: %s\n", trainData.Date))
 		messageText.WriteString(fmt.Sprintf("Operator: %s\n", trainData.Operator))
+		nextStopIdx := -1
+		for i, station := range group.Stations {
+			if station.Arrival != nil && time.Now().Before(station.Arrival.ScheduleTime.Add(func() time.Duration {
+				if station.Arrival.Status != nil {
+					return time.Minute * time.Duration(station.Arrival.Status.Delay)
+				} else {
+					return time.Nanosecond * 0
+				}
+			}())) {
+				nextStopIdx = i
+				break
+			}
+			if station.Departure != nil && time.Now().Before(station.Departure.ScheduleTime.Add(func() time.Duration {
+				if station.Departure.Status != nil {
+					return time.Minute * time.Duration(station.Departure.Status.Delay)
+				} else {
+					return time.Nanosecond * 0
+				}
+			}())) {
+				nextStopIdx = i
+				break
+			}
+		}
+		if nextStopIdx != -1 {
+			nextStop := &group.Stations[nextStopIdx]
+			arrTime := func() *time.Time {
+				if nextStop.Arrival == nil {
+					return nil
+				}
+				if nextStop.Arrival.Status != nil {
+					result := nextStop.Arrival.ScheduleTime.Add(time.Minute * time.Duration(nextStop.Arrival.Status.Delay))
+					return &result
+				}
+				return &nextStop.Arrival.ScheduleTime
+			}()
+			if arrTime != nil && time.Now().Before(*arrTime) {
+				arrStr := "less than 1m"
+				arrDiff := arrTime.Sub(time.Now())
+				if arrDiff/time.Hour >= 1 {
+					arrStr = fmt.Sprintf("%dh%dm", arrDiff/time.Hour, (arrDiff%time.Hour)/time.Minute)
+				} else if arrDiff/time.Minute >= 1 {
+					arrStr = fmt.Sprintf("%dm", arrDiff/time.Minute)
+				}
+				messageText.WriteString(fmt.Sprintf("Next stop: %s, arriving in %s at %s\n", nextStop.Name, arrStr, arrTime.In(utils.Location).Format("15:04")))
+			} else {
+				depStr := "less than 1m"
+				depDiff := nextStop.Departure.ScheduleTime.Add(func() time.Duration {
+					if nextStop.Departure.Status != nil {
+						return time.Minute * time.Duration(nextStop.Departure.Status.Delay)
+					} else {
+						return time.Nanosecond * 0
+					}
+				}()).Sub(time.Now())
+				if depDiff/time.Hour >= 1 {
+					depStr = fmt.Sprintf("%dh%dm", depDiff/time.Hour, (depDiff%time.Hour)/time.Minute)
+				} else if depDiff/time.Minute >= 1 {
+					depStr = fmt.Sprintf("%dm", depDiff/time.Minute)
+				}
+				messageText.WriteString(fmt.Sprintf("Currently stopped at: %s, departing in %s\n", nextStop.Name, depStr))
+			}
+		}
 		if group.Status != nil {
 			messageText.WriteString("Status: ")
 			if group.Status.Delay == 0 {
