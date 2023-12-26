@@ -183,19 +183,20 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 				messageText.WriteString(fmt.Sprintf("Next stop: %s, arriving in %s at %s\n", nextStop.Name, arrStr, arrTime.In(utils.Location).Format("15:04")))
 			} else {
 				depStr := "less than 1m"
-				depDiff := nextStop.Departure.ScheduleTime.Add(func() time.Duration {
+				depTime := nextStop.Departure.ScheduleTime.Add(func() time.Duration {
 					if nextStop.Departure.Status != nil {
 						return time.Minute * time.Duration(nextStop.Departure.Status.Delay)
 					} else {
 						return time.Nanosecond * 0
 					}
-				}()).Sub(time.Now())
+				}())
+				depDiff := depTime.Sub(time.Now())
 				if depDiff/time.Hour >= 1 {
 					depStr = fmt.Sprintf("%dh%dm", depDiff/time.Hour, (depDiff%time.Hour)/time.Minute)
 				} else if depDiff/time.Minute >= 1 {
 					depStr = fmt.Sprintf("%dm", depDiff/time.Minute)
 				}
-				messageText.WriteString(fmt.Sprintf("Currently stopped at: %s, departing in %s\n", nextStop.Name, depStr))
+				messageText.WriteString(fmt.Sprintf("Currently stopped at: %s, departing in %s at %s\n", nextStop.Name, depStr, depTime.In(utils.Location).Format("15:04")))
 			}
 		}
 		if group.Status != nil {
