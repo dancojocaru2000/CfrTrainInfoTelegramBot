@@ -75,6 +75,9 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 	}
 
 	shouldUnsubscribe := func() bool {
+		if groupIndex == -1 {
+			return false
+		}
 		if len(trainData.Groups) <= groupIndex {
 			groupIndex = 0
 		}
