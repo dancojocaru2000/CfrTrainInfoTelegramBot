@@ -343,7 +343,7 @@ func handleFindTrainStages(ctx context.Context, b *tgBot.Bot, update *models.Upd
 			groupIndex := -1
 
 			if len(commandParams) > 1 {
-				date, _ = time.Parse(time.RFC3339, commandParams[1])
+				date, _ = utils.ParseDate(commandParams[1])
 			}
 			if len(commandParams) > 2 {
 				groupIndex, _ = strconv.Atoi(commandParams[2])
