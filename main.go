@@ -44,7 +44,7 @@ You may use ` + cancelCommand + ` to cancel any ongoing command.`
 You may also send the date as a message in the following formats: dd.mm.yyyy, m/d/yyyy, yyyy-mm-dd, UNIX timestamp.
 
 Keep in mind that, for night trains, this date might be yesterday.`
-	invalidDateMessage = "Invalid date. Please try again or us " + cancelCommand + " to cancel."
+	invalidDateMessage = "Invalid date. Please try again or use " + cancelCommand + " to cancel."
 )
 
 func main() {
