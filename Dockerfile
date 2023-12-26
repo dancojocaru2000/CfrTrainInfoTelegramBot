@@ -5,6 +5,8 @@ FROM --platform=$BUILDPLATFORM golang:1.21-alpine AS build
 LABEL authors="kbruen"
 LABEL org.opencontainers.image.source=https://github.com/dancojocaru2000/CfrTrainInfoTelegramBot
 
+RUN apk add tzdata
+
 RUN echo "@testing https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
 RUN apk add zig@testing
 COPY --from=xx / /
@@ -25,6 +27,7 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH CGO_CFLAGS="-D_LARGEFILE64_SOURCE" CC="zig
 
 FROM scratch
 COPY --from=build /etc/ssl/certs /etc/ssl/certs
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 WORKDIR /app
 # COPY static ./static/
 COPY --from=build /app/server ./
