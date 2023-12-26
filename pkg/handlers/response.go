@@ -8,6 +8,7 @@ type HandlerResponse struct {
 	CallbackAnswer          *bot.AnswerCallbackQueryParams
 	MessageEdits            []*bot.EditMessageTextParams
 	MessageMarkupEdits      []*bot.EditMessageReplyMarkupParams
+	ShouldUnsubscribe       bool
 	Injected                struct {
 		ChatId    int64
 		MessageId int

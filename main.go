@@ -257,7 +257,7 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 						},
 					}
 				} else {
-					// TODO: Update message to contain unsubscribe button
+					log.Printf("DEBUG: Subscribed: chatID %d, trainNumber %s, date %s, groupIndex %d", update.CallbackQuery.Message.Chat.ID, trainNumber, date.Format("2006-01-02"), groupIndex)
 					response = &handlers.HandlerResponse{
 						CallbackAnswer: &tgBot.AnswerCallbackQueryParams{
 							Text: fmt.Sprintf("Subscribed successfully!"),
@@ -287,7 +287,7 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 						},
 					}
 				} else {
-					// TODO: Update message to contain unsubscribe button
+					log.Printf("DEBUG: Unsubscribed: chatID %d, trainNumber %s, date %s, groupIndex %d", update.CallbackQuery.Message.Chat.ID, trainNumber, date.Format("2006-01-02"), groupIndex)
 					response = &handlers.HandlerResponse{
 						CallbackAnswer: &tgBot.AnswerCallbackQueryParams{
 							Text: fmt.Sprintf("Unsubscribed successfully!"),
@@ -301,6 +301,9 @@ func handler(ctx context.Context, b *tgBot.Bot, update *models.Update, subs *sub
 						},
 					}
 				}
+
+			default:
+				log.Printf("WARN : Unknown callback query method: %s", splitted[0])
 			}
 		}
 	}

@@ -46,6 +46,11 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 			Message: &bot.SendMessageParams{
 				Text: fmt.Sprintf("The train %s was not found.", trainNumber),
 			},
+			ShouldUnsubscribe: func() bool {
+				now := time.Now().In(utils.Location)
+				midnightYesterday := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, utils.Location)
+				return date.Before(midnightYesterday)
+			}(),
 		}, false
 	case errors.Is(err, api.ServerError):
 		log.Printf("ERROR: In handle train number: %s", err.Error())
@@ -53,6 +58,11 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 			Message: &bot.SendMessageParams{
 				Text: fmt.Sprintf("Unknown server error when searching for train %s.", trainNumber),
 			},
+			ShouldUnsubscribe: func() bool {
+				now := time.Now().In(utils.Location)
+				midnightYesterday := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, utils.Location)
+				return date.Before(midnightYesterday)
+			}(),
 		}, false
 	default:
 		log.Printf("ERROR: In handle train number: %s", err.Error())
@@ -62,6 +72,32 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 	if len(trainData.Groups) == 1 {
 		groupIndex = 0
 	}
+
+	shouldUnsubscribe := func() bool {
+		if len(trainData.Groups) <= groupIndex {
+			groupIndex = 0
+		}
+		now := time.Now().In(utils.Location)
+		midnightYesterday := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, utils.Location)
+		lastStation := trainData.Groups[groupIndex].
+			Stations[len(trainData.Groups[groupIndex].Stations)-1]
+		if now.After(lastStation.Arrival.
+			ScheduleTime.Add(time.Hour * 6)) {
+			return true
+		}
+		if trainData.Groups[groupIndex].
+			Status != nil && trainData.Groups[groupIndex].
+			Status.Station == lastStation.Name &&
+			trainData.Groups[groupIndex].Status.
+				State == "arrival" {
+			return true
+		}
+		if date.Before(midnightYesterday) {
+			return true
+		}
+
+		return false
+	}()
 
 	message := bot.SendMessageParams{}
 	if groupIndex == -1 {
@@ -136,7 +172,9 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 			},
 		}
 		buttonKind := TrainInfoResponseButtonIncludeSub
-		if isSubscribed {
+		if shouldUnsubscribe {
+			buttonKind = TrainInfoResponseButtonExcludeSub
+		} else if isSubscribed {
 			buttonKind = TrainInfoResponseButtonIncludeUnsub
 		}
 		message.ReplyMarkup = GetTrainNumberCommandResponseButtons(trainData.Number, group.Stations[0].Departure.ScheduleTime, groupIndex, buttonKind)
@@ -153,7 +191,8 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 	}
 
 	return &HandlerResponse{
-		Message: &message,
+		Message:           &message,
+		ShouldUnsubscribe: shouldUnsubscribe,
 	}, true
 }
 
