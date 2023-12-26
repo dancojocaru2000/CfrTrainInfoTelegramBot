@@ -123,7 +123,7 @@ func (sub *Subscriptions) DeleteSubscription(chatId int64, messageId int) (*SubD
 }
 
 func (sub *Subscriptions) CheckSubscriptions(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 90)
+	ticker := time.NewTicker(time.Second * 45)
 
 	sub.executeChecks(ctx)
 	for {
