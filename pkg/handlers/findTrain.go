@@ -182,7 +182,7 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 				}
 				messageText.WriteString(fmt.Sprintf("Next stop: %s, arriving in %s at %s\n", nextStop.Name, arrStr, arrTime.In(utils.Location).Format("15:04")))
 			} else {
-				depStr := "less than 1m"
+				depStr := ""
 				depTime := nextStop.Departure.ScheduleTime.Add(func() time.Duration {
 					if nextStop.Departure.Status != nil {
 						return time.Minute * time.Duration(nextStop.Departure.Status.Delay)
@@ -191,12 +191,25 @@ func HandleTrainNumberCommand(ctx context.Context, trainNumber string, date time
 					}
 				}())
 				depDiff := depTime.Sub(time.Now())
-				if depDiff/time.Hour >= 1 {
-					depStr = fmt.Sprintf("%dh%dm", depDiff/time.Hour, (depDiff%time.Hour)/time.Minute)
-				} else if depDiff/time.Minute >= 1 {
-					depStr = fmt.Sprintf("%dm", depDiff/time.Minute)
+				if depDiff/(time.Hour*24) >= 1 {
+					depStr += fmt.Sprintf("%dd", depDiff/(time.Hour*24))
+					depDiff = depDiff % (time.Hour * 24)
 				}
-				messageText.WriteString(fmt.Sprintf("Currently stopped at: %s, departing in %s at %s\n", nextStop.Name, depStr, depTime.In(utils.Location).Format("15:04")))
+				if depDiff/time.Hour >= 1 {
+					depStr += fmt.Sprintf("%dh", depDiff/time.Hour)
+					depDiff = depDiff % time.Hour
+				}
+				if depDiff/time.Minute >= 1 {
+					depStr += fmt.Sprintf("%dm", depDiff/time.Minute)
+				}
+				if len(depStr) == 0 {
+					depStr = "less than 1m"
+				}
+				if nextStopIdx == 0 {
+					messageText.WriteString(fmt.Sprintf("The train will depart from %s in %s at %s\n", nextStop.Name, depStr, depTime.In(utils.Location).Format("15:04")))
+				} else {
+					messageText.WriteString(fmt.Sprintf("Currently stopped at: %s, departing in %s at %s\n", nextStop.Name, depStr, depTime.In(utils.Location).Format("15:04")))
+				}
 			}
 		}
 		if group.Status != nil {
