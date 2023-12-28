@@ -26,7 +26,7 @@ const (
 
 	subscribeButton    = "Subscribe to updates"
 	unsubscribeButton  = "Unsubscribe from updates"
-	openInWebAppButton = "Open in WebApp"
+	viewInWebAppButton = "View in WebApp"
 )
 
 const (
@@ -290,8 +290,16 @@ func GetTrainNumberCommandResponseButtons(trainNumber string, date time.Time, gr
 	}
 	result = append(result, []models.InlineKeyboardButton{
 		{
-			Text: openInWebAppButton,
-			URL:  kaiUrl.String(),
+			Text: viewInWebAppButton,
+			WebApp: &models.WebAppInfo{
+				URL: func() string {
+					miniAppUrl := *kaiUrl
+					miniAppUrlQuery := miniAppUrl.Query()
+					miniAppUrlQuery.Add("tg", "1")
+					miniAppUrl.RawQuery = miniAppUrlQuery.Encode()
+					return miniAppUrl.String()
+				}(),
+			},
 		},
 	})
 	return models.InlineKeyboardMarkup{
